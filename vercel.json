@@ -14,14 +14,12 @@
         {
           "key": "Accept-Ranges",
           "value": "bytes"
+        },
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
         }
       ]
-    }
-  ],
-  "rewrites": [
-    {
-      "source": "/how-the-state-government-works.mp4",
-      "destination": "/how-the-state-government-works.mp4"
     }
   ]
 }
