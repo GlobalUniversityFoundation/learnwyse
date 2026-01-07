@@ -57,6 +57,7 @@ function VideoPlayer() {
   const recognitionRef = useRef(null)
   const listeningTimeoutRef = useRef(null)
   const [pdfContent, setPdfContent] = useState('')
+  const [videoError, setVideoError] = useState('')
 
   const openAiKey =
     import.meta.env.VITE_OPENAI_API_KEY || import.meta.env.OPENAI_API_KEY || ''
@@ -745,6 +746,34 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
                 controlsList="nodownload"
                 preload="metadata"
                 crossOrigin="anonymous"
+                onError={(e) => {
+                  const error = videoRef.current?.error
+                  if (error) {
+                    let errorMsg = 'Video loading error: '
+                    switch (error.code) {
+                      case error.MEDIA_ERR_ABORTED:
+                        errorMsg += 'Video loading aborted'
+                        break
+                      case error.MEDIA_ERR_NETWORK:
+                        errorMsg += 'Network error while loading video'
+                        break
+                      case error.MEDIA_ERR_DECODE:
+                        errorMsg += 'Video decoding error'
+                        break
+                      case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                        errorMsg += 'Video format not supported or file not found'
+                        break
+                      default:
+                        errorMsg += `Unknown error (code: ${error.code})`
+                    }
+                    console.error('Video error:', errorMsg, error)
+                    setVideoError(errorMsg)
+                  }
+                }}
+                onLoadedMetadata={() => {
+                  setVideoError('')
+                  console.log('Video metadata loaded successfully')
+                }}
               >
                 <source src="/how-the-state-government-works.mp4" type="video/mp4" />
                 Your browser does not support the video tag.
@@ -752,6 +781,11 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
             </div>
             <div className="video-info">
               <h3 className="video-title">{getCurrentChapterTitle()}</h3>
+              {videoError && (
+                <div style={{ color: 'red', marginTop: '10px', padding: '10px', background: '#ffebee', borderRadius: '4px' }}>
+                  {videoError}
+                </div>
+              )}
             </div>
 
             {chapterSlug === 'how-the-state-government-works' && (
