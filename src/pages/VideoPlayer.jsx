@@ -723,6 +723,8 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
                   className="mini-video"
                   controls
                   controlsList="nodownload"
+                  preload="metadata"
+                  crossOrigin="anonymous"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <source src="/how-the-state-government-works.mp4" type="video/mp4" />
@@ -741,6 +743,8 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
                 className="lesson-video"
                 controls
                 controlsList="nodownload"
+                preload="metadata"
+                crossOrigin="anonymous"
               >
                 <source src="/how-the-state-government-works.mp4" type="video/mp4" />
                 Your browser does not support the video tag.
