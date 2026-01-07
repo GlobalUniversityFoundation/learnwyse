@@ -59,6 +59,15 @@ function VideoPlayer() {
   const [pdfContent, setPdfContent] = useState('')
   const [videoError, setVideoError] = useState('')
 
+  // Get video URL from environment variable (Bytescale) or use local path
+  const videoUrl = useMemo(() => {
+    const bytescaleUrl = import.meta.env.VITE_BYTESCALE_VIDEO_URL
+    if (bytescaleUrl) {
+      return bytescaleUrl
+    }
+    return '/how-the-state-government-works.mp4'
+  }, [])
+
   const openAiKey =
     import.meta.env.VITE_OPENAI_API_KEY || import.meta.env.OPENAI_API_KEY || ''
   const elevenLabsKey =
@@ -727,7 +736,7 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
                   preload="metadata"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <source src="/how-the-state-government-works.mp4" type="video/mp4" />
+                  <source src={videoUrl} type="video/mp4" />
                   Your browser does not support the video tag.
                 </video>
               </div>
@@ -773,7 +782,7 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
                   console.log('Video metadata loaded successfully')
                 }}
               >
-                <source src="/how-the-state-government-works.mp4" type="video/mp4" />
+                <source src={videoUrl} type="video/mp4" />
                 Your browser does not support the video tag.
               </video>
             </div>
