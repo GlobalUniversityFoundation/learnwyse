@@ -18,18 +18,9 @@
         {
           "key": "Access-Control-Allow-Origin",
           "value": "*"
-        },
-        {
-          "key": "Content-Length",
-          "value": ""
         }
       ]
     }
-  ],
-  "functions": {
-    "**": {
-      "maxDuration": 300
-    }
-  }
+  ]
 }
 
