@@ -725,7 +725,6 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
                   controls
                   controlsList="nodownload"
                   preload="metadata"
-                  crossOrigin="anonymous"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <source src="/how-the-state-government-works.mp4" type="video/mp4" />
@@ -745,7 +744,6 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
                 controls
                 controlsList="nodownload"
                 preload="metadata"
-                crossOrigin="anonymous"
                 onError={(e) => {
                   const error = videoRef.current?.error
                   if (error) {
@@ -755,7 +753,7 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
                         errorMsg += 'Video loading aborted'
                         break
                       case error.MEDIA_ERR_NETWORK:
-                        errorMsg += 'Network error while loading video'
+                        errorMsg += 'Network error while loading video. The file may be too large (209MB). Consider hosting on a CDN.'
                         break
                       case error.MEDIA_ERR_DECODE:
                         errorMsg += 'Video decoding error'
