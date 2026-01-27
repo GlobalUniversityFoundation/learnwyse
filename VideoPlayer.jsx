@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { PorcupineWorker } from '@picovoice/porcupine-web'
-import { WebVoiceProcessor } from '@picovoice/web-voice-processor'
 import * as pdfjsLib from 'pdfjs-dist'
 import mascotImage from '../../mascot.png'
 
@@ -13,57 +11,6 @@ if (typeof window !== 'undefined') {
   ).toString()
 }
 
-const PORCUPINE_MODEL_PATH = '/porcupine_params.pv'
-const PORCUPINE_KEYWORD_PATH = '/Hey-Mister-Wise_en_wasm_v3_0_0.ppn'
-
-let cachedPorcupineAssets = {
-  keywordBase64: null
-}
-
-async function fetchBinaryAsBase64(url) {
-  console.log('[Porcupine] fetchBinaryAsBase64: Starting fetch for', url)
-  try {
-    const response = await fetch(url)
-    console.log('[Porcupine] fetchBinaryAsBase64: Response received:', {
-      url,
-      status: response.status,
-      statusText: response.statusText,
-      ok: response.ok,
-      contentType: response.headers.get('content-type'),
-      contentLength: response.headers.get('content-length')
-    })
-    if (!response.ok) {
-      const error = new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`)
-      console.error('[Porcupine] fetchBinaryAsBase64: Fetch failed', error)
-      throw error
-    }
-    const buffer = await response.arrayBuffer()
-    console.log('[Porcupine] fetchBinaryAsBase64: Buffer received:', {
-      bufferSize: buffer.byteLength
-    })
-    const bytes = new Uint8Array(buffer)
-    let binary = ''
-    for (let i = 0; i < bytes.byteLength; i += 1) {
-      binary += String.fromCharCode(bytes[i])
-    }
-    const base64 = window.btoa(binary)
-    console.log('[Porcupine] fetchBinaryAsBase64: Conversion complete:', {
-      binaryLength: binary.length,
-      base64Length: base64.length
-    })
-    return base64
-  } catch (error) {
-    console.error('[Porcupine] fetchBinaryAsBase64: Error during fetch:', {
-      url,
-      error,
-      errorType: error?.constructor?.name,
-      errorMessage: error?.message,
-      errorStack: error?.stack
-    })
-    throw error
-  }
-}
-
 function VideoPlayer() {
   const navigate = useNavigate()
   const { chapterSlug } = useParams()
@@ -73,10 +20,8 @@ function VideoPlayer() {
   const videoContainerRef = useRef(null)
   const videoRef = useRef(null)
   const miniVideoRef = useRef(null)
-  const accessKey = import.meta.env.VITE_PICOVOICE_ACCESS_KEY
   const [isWakeActive, setIsWakeActive] = useState(false)
   const wakeGlowTimeoutRef = useRef(null)
-  const porcupineInstanceRef = useRef(null)
   const assistantAudioRef = useRef(null)
   const isGeneratingRef = useRef(false)
   const [assistantResponse, setAssistantResponse] = useState('')
@@ -88,6 +33,7 @@ function VideoPlayer() {
   const listeningTimeoutRef = useRef(null)
   const [pdfContent, setPdfContent] = useState('')
   const [videoError, setVideoError] = useState('')
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false)
 
   // Get video URL from environment variable (Bytescale) or use local path
   const videoUrl = useMemo(() => {
@@ -304,7 +250,25 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
       const audioUrl = URL.createObjectURL(audioBlob)
       const audio = new Audio(audioUrl)
       assistantAudioRef.current = audio
-      audio.play().catch(() => {})
+      
+      // Track audio playback state
+      audio.onplay = () => setIsAudioPlaying(true)
+      audio.onended = () => {
+        setIsAudioPlaying(false)
+        URL.revokeObjectURL(audioUrl)
+      }
+      audio.onerror = () => {
+        setIsAudioPlaying(false)
+        URL.revokeObjectURL(audioUrl)
+      }
+      audio.onpause = () => {
+        setIsAudioPlaying(false)
+      }
+      
+      audio.play().catch(() => {
+        setIsAudioPlaying(false)
+        URL.revokeObjectURL(audioUrl)
+      })
     } catch (error) {
       console.error(error)
       setAssistantError(error.message || 'Unable to generate assistant response.')
@@ -436,186 +400,48 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
     }
   }, [])
 
-  // Initialize wake word listener for the custom "Hey Mister Wise" keyword
+  // Handle mascot click to activate voice assistant
+  const handleMascotClick = useCallback(() => {
+    // Only activate for the specific chapter that supports the assistant
+    if (chapterSlug !== 'how-the-state-government-works') {
+      return
+    }
+    
+    // Don't allow clicking if already listening, generating response, or audio is playing
+    if (isListening || isGeneratingResponse || isAudioPlaying) {
+      return
+    }
+    
+    // Activate visual feedback
+    setIsWakeActive(true)
+    if (wakeGlowTimeoutRef.current) {
+      clearTimeout(wakeGlowTimeoutRef.current)
+    }
+    wakeGlowTimeoutRef.current = setTimeout(() => {
+      setIsWakeActive(false)
+    }, 2000)
+    
+    // Start listening for user input
+    startListening()
+  }, [chapterSlug, isListening, isGeneratingResponse, isAudioPlaying, startListening])
+
+  // Cleanup timeout and audio on unmount
   useEffect(() => {
-    let isCancelled = false
-
-    const initializeWakeWord = async () => {
-      console.log('[Porcupine] Starting initialization...')
-      console.log('[Porcupine] Chapter slug:', chapterSlug)
-      console.log('[Porcupine] Window available:', typeof window !== 'undefined')
-      
-      if (!accessKey) {
-        console.error('[Porcupine] AccessKey missing! Set VITE_PICOVOICE_ACCESS_KEY in your environment.')
-        console.log('[Porcupine] Environment check:', {
-          hasAccessKey: !!accessKey,
-          accessKeyLength: accessKey?.length || 0,
-          accessKeyPrefix: accessKey?.substring(0, 10) || 'N/A'
-        })
-        return
-      }
-
-      console.log('[Porcupine] AccessKey found:', {
-        length: accessKey.length,
-        prefix: accessKey.substring(0, 10) + '...',
-        suffix: '...' + accessKey.substring(accessKey.length - 10)
-      })
-
-      try {
-        console.log('[Porcupine] Checking keyword file cache...')
-        if (!cachedPorcupineAssets.keywordBase64) {
-          console.log('[Porcupine] Fetching keyword file from:', PORCUPINE_KEYWORD_PATH)
-          const startTime = Date.now()
-          cachedPorcupineAssets.keywordBase64 = await fetchBinaryAsBase64(PORCUPINE_KEYWORD_PATH)
-          const fetchTime = Date.now() - startTime
-          console.log('[Porcupine] Keyword file fetched successfully:', {
-            base64Length: cachedPorcupineAssets.keywordBase64.length,
-            fetchTimeMs: fetchTime
-          })
-        } else {
-          console.log('[Porcupine] Using cached keyword file:', {
-            base64Length: cachedPorcupineAssets.keywordBase64.length
-          })
-        }
-
-        const detectionCallback = (detection) => {
-          console.log('[Porcupine] Detection callback triggered:', {
-            detection,
-            isCancelled,
-            isUnderstood: detection?.isUnderstood
-          })
-          if (isCancelled) {
-            console.log('[Porcupine] Detection ignored - component cancelled')
-            return
-          }
-          if (detection?.isUnderstood === false) {
-            console.log('[Porcupine] Detection ignored - not understood')
-            return
-          }
-          console.log('[Porcupine] Wake word detected! Activating...')
-          setIsWakeActive(true)
-          if (wakeGlowTimeoutRef.current) {
-            clearTimeout(wakeGlowTimeoutRef.current)
-          }
-          wakeGlowTimeoutRef.current = setTimeout(() => {
-            setIsWakeActive(false)
-            console.log('[Porcupine] Wake word glow timeout expired')
-          }, 2000)
-          // Start listening for user input after wake word
-          console.log('[Porcupine] Starting speech recognition...')
-          startListening()
-        }
-
-        console.log('[Porcupine] Creating PorcupineWorker...')
-        console.log('[Porcupine] Worker config:', {
-          keywordLabel: 'Hey Mister Wise',
-          sensitivity: 0.65,
-          modelPath: PORCUPINE_MODEL_PATH,
-          customWritePath: 'learnwyse_porcupine_model',
-          version: 3
-        })
-        
-        const workerStartTime = Date.now()
-        const porcupineWorker = await PorcupineWorker.create(
-          accessKey,
-          {
-            base64: cachedPorcupineAssets.keywordBase64,
-            label: 'Hey Mister Wise',
-            sensitivity: 0.65
-          },
-          detectionCallback,
-          {
-            publicPath: PORCUPINE_MODEL_PATH,
-            customWritePath: 'learnwyse_porcupine_model',
-            version: 3
-          },
-          {
-            processErrorCallback: (error) => {
-              console.error('[Porcupine] Processing error:', {
-                error,
-                errorType: error?.constructor?.name,
-                errorMessage: error?.message,
-                errorStack: error?.stack,
-                errorCode: error?.code,
-                errorDetails: error
-              })
-            }
-          }
-        )
-        const workerCreateTime = Date.now() - workerStartTime
-        console.log('[Porcupine] PorcupineWorker created successfully:', {
-          workerType: porcupineWorker?.constructor?.name,
-          createTimeMs: workerCreateTime
-        })
-
-        porcupineInstanceRef.current = porcupineWorker
-        
-        console.log('[Porcupine] Subscribing to WebVoiceProcessor...')
-        const subscribeStartTime = Date.now()
-        await WebVoiceProcessor.subscribe(porcupineWorker)
-        const subscribeTime = Date.now() - subscribeStartTime
-        console.log('[Porcupine] Successfully subscribed to WebVoiceProcessor:', {
-          subscribeTimeMs: subscribeTime
-        })
-        
-        console.log('[Porcupine] Initialization complete! Wake word detection is active.')
-      } catch (error) {
-        console.error('[Porcupine] Initialization failed:', {
-          error,
-          errorType: error?.constructor?.name,
-          errorName: error?.name,
-          errorMessage: error?.message,
-          errorStack: error?.stack,
-          errorCode: error?.code,
-          errorDetails: error,
-          accessKeyPresent: !!accessKey,
-          accessKeyLength: accessKey?.length || 0,
-          keywordFileCached: !!cachedPorcupineAssets.keywordBase64,
-          keywordFileLength: cachedPorcupineAssets.keywordBase64?.length || 0
-        })
-      }
-    }
-
-    if (chapterSlug === 'how-the-state-government-works' && typeof window !== 'undefined') {
-      console.log('[Porcupine] Conditions met, initializing wake word...')
-      initializeWakeWord()
-    } else {
-      console.log('[Porcupine] Skipping initialization:', {
-        chapterSlug,
-        isCorrectChapter: chapterSlug === 'how-the-state-government-works',
-        windowAvailable: typeof window !== 'undefined'
-      })
-    }
-
     return () => {
-      console.log('[Porcupine] Cleanup: Component unmounting or dependencies changed')
-      isCancelled = true
       if (wakeGlowTimeoutRef.current) {
         clearTimeout(wakeGlowTimeoutRef.current)
         wakeGlowTimeoutRef.current = null
-        console.log('[Porcupine] Cleanup: Cleared wake glow timeout')
       }
-      const porcupineWorker = porcupineInstanceRef.current
-      if (porcupineWorker) {
-        console.log('[Porcupine] Cleanup: Unsubscribing and terminating worker')
-        WebVoiceProcessor.unsubscribe(porcupineWorker).catch((err) => {
-          console.error('[Porcupine] Cleanup: Error unsubscribing:', err)
-        })
-        porcupineWorker.postMessage?.({ command: 'release' })
-        porcupineWorker.terminate?.()
-        porcupineInstanceRef.current = null
-        console.log('[Porcupine] Cleanup: Worker terminated')
-      }
-      setIsWakeActive(false)
       if (assistantAudioRef.current) {
         assistantAudioRef.current.pause()
-        URL.revokeObjectURL(assistantAudioRef.current.src)
+        if (assistantAudioRef.current.src) {
+          URL.revokeObjectURL(assistantAudioRef.current.src)
+        }
         assistantAudioRef.current = null
-        console.log('[Porcupine] Cleanup: Assistant audio cleaned up')
       }
-      console.log('[Porcupine] Cleanup complete')
+      setIsAudioPlaying(false)
     }
-  }, [accessKey, chapterSlug, startListening])
+  }, [])
 
   // Sync mini player with main video
   useEffect(() => {
@@ -869,7 +695,12 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
               </div>
             </div>
           )}
-          <div className={`mascot-container ${isWakeActive ? 'wake-active' : ''}`}>
+          <div 
+            className={`mascot-container ${isWakeActive ? 'wake-active' : ''} ${(isListening || isGeneratingResponse || isAudioPlaying) ? 'disabled' : ''}`}
+            onClick={handleMascotClick}
+            style={{ cursor: (isListening || isGeneratingResponse || isAudioPlaying) ? 'not-allowed' : 'pointer' }}
+            title={(isListening || isGeneratingResponse || isAudioPlaying) ? 'Please wait for the response to finish' : 'Click to activate voice assistant'}
+          >
             <img src={mascotImage} alt="Mascot" className="mascot-image" />
           </div>
           <div className="video-container" ref={videoContainerRef}>
@@ -1022,7 +853,7 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
                     ) : (
                       !assistantError && !isListening && (
                         <p className="assistant-placeholder">
-                          Say “Hey Mister Wise” to start a conversation.
+                          Click the owl to start a conversation.
                         </p>
                       )
                     )}
