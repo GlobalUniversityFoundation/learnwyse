@@ -1690,12 +1690,31 @@ body {
   bottom: 20px;
   right: 20px;
   z-index: 999;
-  pointer-events: none;
+  pointer-events: auto;
   width: 120px;
   height: 120px;
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.mascot-container:hover:not(.disabled) {
+  transform: scale(1.1);
+}
+
+.mascot-container:active:not(.disabled) {
+  transform: scale(0.95);
+}
+
+.mascot-container.disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+
+.mascot-container.disabled .mascot-image {
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.3)) grayscale(0.3);
 }
 
 .mascot-container::after {
@@ -1725,6 +1744,15 @@ body {
   height: auto;
   filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.3));
   animation: float 3s ease-in-out infinite;
+  transition: filter 0.3s ease;
+}
+
+.mascot-container.wake-active .mascot-image {
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.3)) 
+          drop-shadow(0 0 20px rgba(79, 209, 197, 0.8))
+          drop-shadow(0 0 40px rgba(139, 92, 246, 0.6))
+          hue-rotate(10deg) 
+          brightness(1.1);
 }
 
 @keyframes float {

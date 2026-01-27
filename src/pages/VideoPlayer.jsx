@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { PorcupineWorker } from '@picovoice/porcupine-web'
-import { WebVoiceProcessor } from '@picovoice/web-voice-processor'
 import * as pdfjsLib from 'pdfjs-dist'
 import mascotImage from '../../mascot.png'
 
@@ -13,27 +11,6 @@ if (typeof window !== 'undefined') {
   ).toString()
 }
 
-const PORCUPINE_MODEL_PATH = '/porcupine_params.pv'
-const PORCUPINE_KEYWORD_PATH = '/Hey-Mister-Wise_en_wasm_v3_0_0.ppn'
-
-let cachedPorcupineAssets = {
-  keywordBase64: null
-}
-
-async function fetchBinaryAsBase64(url) {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`)
-  }
-  const buffer = await response.arrayBuffer()
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  for (let i = 0; i < bytes.byteLength; i += 1) {
-    binary += String.fromCharCode(bytes[i])
-  }
-  return window.btoa(binary)
-}
-
 function VideoPlayer() {
   const navigate = useNavigate()
   const { chapterSlug } = useParams()
@@ -43,10 +20,8 @@ function VideoPlayer() {
   const videoContainerRef = useRef(null)
   const videoRef = useRef(null)
   const miniVideoRef = useRef(null)
-  const accessKey = import.meta.env.VITE_PICOVOICE_ACCESS_KEY
   const [isWakeActive, setIsWakeActive] = useState(false)
   const wakeGlowTimeoutRef = useRef(null)
-  const porcupineInstanceRef = useRef(null)
   const assistantAudioRef = useRef(null)
   const isGeneratingRef = useRef(false)
   const [assistantResponse, setAssistantResponse] = useState('')
@@ -58,6 +33,7 @@ function VideoPlayer() {
   const listeningTimeoutRef = useRef(null)
   const [pdfContent, setPdfContent] = useState('')
   const [videoError, setVideoError] = useState('')
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false)
 
   // Get video URL from environment variable (Bytescale) or use local path
   const videoUrl = useMemo(() => {
@@ -274,7 +250,25 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
       const audioUrl = URL.createObjectURL(audioBlob)
       const audio = new Audio(audioUrl)
       assistantAudioRef.current = audio
-      audio.play().catch(() => {})
+      
+      // Track audio playback state
+      audio.onplay = () => setIsAudioPlaying(true)
+      audio.onended = () => {
+        setIsAudioPlaying(false)
+        URL.revokeObjectURL(audioUrl)
+      }
+      audio.onerror = () => {
+        setIsAudioPlaying(false)
+        URL.revokeObjectURL(audioUrl)
+      }
+      audio.onpause = () => {
+        setIsAudioPlaying(false)
+      }
+      
+      audio.play().catch(() => {
+        setIsAudioPlaying(false)
+        URL.revokeObjectURL(audioUrl)
+      })
     } catch (error) {
       console.error(error)
       setAssistantError(error.message || 'Unable to generate assistant response.')
@@ -406,89 +400,48 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
     }
   }, [])
 
-  // Initialize wake word listener for the custom "Hey Mister Wise" keyword
+  // Handle mascot click to activate voice assistant
+  const handleMascotClick = useCallback(() => {
+    // Only activate for the specific chapter that supports the assistant
+    if (chapterSlug !== 'how-the-state-government-works') {
+      return
+    }
+    
+    // Don't allow clicking if already listening, generating response, or audio is playing
+    if (isListening || isGeneratingResponse || isAudioPlaying) {
+      return
+    }
+    
+    // Activate visual feedback
+    setIsWakeActive(true)
+    if (wakeGlowTimeoutRef.current) {
+      clearTimeout(wakeGlowTimeoutRef.current)
+    }
+    wakeGlowTimeoutRef.current = setTimeout(() => {
+      setIsWakeActive(false)
+    }, 2000)
+    
+    // Start listening for user input
+    startListening()
+  }, [chapterSlug, isListening, isGeneratingResponse, isAudioPlaying, startListening])
+
+  // Cleanup timeout and audio on unmount
   useEffect(() => {
-    let isCancelled = false
-
-    const initializeWakeWord = async () => {
-      if (!accessKey) {
-        console.warn(
-          'Picovoice AccessKey missing. Set VITE_PICOVOICE_ACCESS_KEY in your environment to enable wake word detection.'
-        )
-        return
-      }
-
-      try {
-        if (!cachedPorcupineAssets.keywordBase64) {
-          cachedPorcupineAssets.keywordBase64 = await fetchBinaryAsBase64(PORCUPINE_KEYWORD_PATH)
-        }
-
-        const detectionCallback = (detection) => {
-          if (isCancelled) return
-          if (detection?.isUnderstood === false) return
-          setIsWakeActive(true)
-          if (wakeGlowTimeoutRef.current) {
-            clearTimeout(wakeGlowTimeoutRef.current)
-          }
-          wakeGlowTimeoutRef.current = setTimeout(() => {
-            setIsWakeActive(false)
-          }, 2000)
-          // Start listening for user input after wake word
-          startListening()
-        }
-
-        const porcupineWorker = await PorcupineWorker.create(
-          accessKey,
-          {
-            base64: cachedPorcupineAssets.keywordBase64,
-            label: 'Hey Mister Wise',
-            sensitivity: 0.65
-          },
-          detectionCallback,
-          {
-            publicPath: PORCUPINE_MODEL_PATH,
-            customWritePath: 'learnwyse_porcupine_model',
-            version: 3
-          },
-          {
-            processErrorCallback: (error) => {
-              console.error('Wake word processing error', error)
-            }
-          }
-        )
-
-        porcupineInstanceRef.current = porcupineWorker
-        await WebVoiceProcessor.subscribe(porcupineWorker)
-      } catch (error) {
-        console.error('Failed to initialize wake word detection', error)
-      }
-    }
-
-    if (chapterSlug === 'how-the-state-government-works' && typeof window !== 'undefined') {
-      initializeWakeWord()
-    }
-
     return () => {
-      isCancelled = true
       if (wakeGlowTimeoutRef.current) {
         clearTimeout(wakeGlowTimeoutRef.current)
         wakeGlowTimeoutRef.current = null
       }
-      const porcupineWorker = porcupineInstanceRef.current
-      if (porcupineWorker) {
-        WebVoiceProcessor.unsubscribe(porcupineWorker).catch(() => {})
-        porcupineWorker.postMessage?.({ command: 'release' })
-        porcupineWorker.terminate?.()
-        porcupineInstanceRef.current = null
-      }
-      setIsWakeActive(false)
       if (assistantAudioRef.current) {
         assistantAudioRef.current.pause()
-        URL.revokeObjectURL(assistantAudioRef.current.src)
+        if (assistantAudioRef.current.src) {
+          URL.revokeObjectURL(assistantAudioRef.current.src)
+        }
         assistantAudioRef.current = null
       }
+      setIsAudioPlaying(false)
     }
-  }, [accessKey, chapterSlug, startListening])
+  }, [])
 
   // Sync mini player with main video
   useEffect(() => {
@@ -742,7 +695,12 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
               </div>
             </div>
           )}
-          <div className={`mascot-container ${isWakeActive ? 'wake-active' : ''}`}>
+          <div 
+            className={`mascot-container ${isWakeActive ? 'wake-active' : ''} ${(isListening || isGeneratingResponse || isAudioPlaying) ? 'disabled' : ''}`}
+            onClick={handleMascotClick}
+            style={{ cursor: (isListening || isGeneratingResponse || isAudioPlaying) ? 'not-allowed' : 'pointer' }}
+            title={(isListening || isGeneratingResponse || isAudioPlaying) ? 'Please wait for the response to finish' : 'Click to activate voice assistant'}
+          >
             <img src={mascotImage} alt="Mascot" className="mascot-image" />
           </div>
           <div className="video-container" ref={videoContainerRef}>
@@ -864,7 +822,7 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
                 <div className="mindmap-button-section">
                   <button
                     className="mindmap-button"
-                    onClick={() => window.open(`/study/social-science/mindmap/how-the-state-government-works`, '_blank')}
+                    onClick={() => navigate('/study/social-science/mindmap/how-the-state-government-works')}
                   >
                     <span className="mindmap-button-icon">🗺️</span>
                     <span className="mindmap-button-text">
@@ -895,7 +853,7 @@ Remember: Keep responses short (1-2 sentences), be encouraging, and stay focused
                     ) : (
                       !assistantError && !isListening && (
                         <p className="assistant-placeholder">
-                          Say “Hey Mister Wise” to start a conversation.
+                          Click the owl to start a conversation.
                         </p>
                       )
                     )}
